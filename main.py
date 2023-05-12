@@ -1,9 +1,10 @@
 from __future__ import annotations
 import copy
 from functools import reduce
-import math
-from typing import Generator, Iterable, List, NamedTuple, Optional, Self, Tuple, TypeVar, Union
+from typing import Dict, Generator, Generic, Iterator, List, Self, Tuple, TypeVar, Union, cast
 import numpy as np
+import math
+from collections.abc import MutableMapping
 
 
 def einsum_simple(*args):
@@ -26,6 +27,45 @@ class EinsumComp:
         self.size = size
 
 
+class NullTag:
+    pass
+
+
+K = TypeVar('K')
+V = TypeVar('V')
+
+
+class BiDict(MutableMapping, Generic[K, V]):
+    """A custom dictionary that keeps track of the inverse mapping from values to keys. Values must be unique too
+    """
+
+    def __init__(self):
+        self.store: Dict[K, V] = {}
+        self.inverse: Dict[V, K] = {}
+
+    def __getitem__(self, key: K) -> V:
+        return self.store[key]
+
+    def __setitem__(self, key: K, value: V) -> None:
+        if key in self:
+            del self.inverse[self[key]]
+        self.inverse[value] = key
+        self.store[key] = value
+
+    def __delitem__(self, key: K) -> None:
+        del self.inverse[self[key]]
+        del self.store[key]
+
+    def values(self):
+        return self.inverse.keys()
+
+    def __iter__(self) -> Iterator[K]:
+        return iter(self.store)
+
+    def __len__(self):
+        return len(self.store)
+
+
 class EinsumScript:
     def __init__(self, inputs: List[List[EinsumComp]], outputs: List[EinsumComp]) -> None:
         self.inputs = inputs
@@ -34,13 +74,39 @@ class EinsumScript:
     @classmethod
     def parse(cls, input_shapes: List[List[int]], subscripts: str) -> Self:
         subscripts = subscripts.replace(' ', '')
-        letters = sorted(set(subscripts.replace(',', '').replace('->', '')))
-        letter_dict = {v: EinsumComp(0) for v in letters}
+        # Easier to deal with broadcasting as a single character
+        subscripts = subscripts.replace('...', '?')
+        # The broadcasting character is automatically sorted to the start
+        letters = sorted(subscripts.replace(',', '').replace('->', ''))
+        if '->' not in subscripts:
+            output_letters = [l for l in letters if l ==
+                              '?' or letters.count(l) == 1]
+            subscripts += '->' + ''.join(output_letters)
+        letter_dict = {v: EinsumComp(0) for v in set(letters) if v != '?'}
 
         inputs_subs, output_subs = subscripts.split('->')
-        inputs = [[letter_dict[c] for c in sub]
-                  for sub in inputs_subs.split(',')]
-        outputs = [letter_dict[c] for c in output_subs]
+        inputs: List[List[EinsumComp]] = []
+        broadcast_comps: List[EinsumComp] = []
+        for sub, shape in zip(inputs_subs.split(','), input_shapes):
+            inputs.append([])
+            for c in sub:
+                if c == '?':
+                    # Broadcasting works from the last axis to the first and shares these axes with other broadcasts
+                    undefined_axes = len(shape) - (len(sub) - 1)
+                    for _ in range(undefined_axes - len(broadcast_comps)):
+                        broadcast_comps.insert(0, EinsumComp(0))
+                    inputs[-1].extend(broadcast_comps[-undefined_axes:])
+                else:
+                    inputs[-1].append(letter_dict[c])
+
+        outputs: List[EinsumComp] = []
+        for c in output_subs:
+            if c == '?':
+                # All broadcasted axes are added in order
+                outputs.extend(broadcast_comps)
+            else:
+                outputs.append(letter_dict[c])
+
         script = EinsumScript(inputs, outputs)
         for inp, shape in zip(inputs, input_shapes):
             assert len(inp) == len(shape)
@@ -52,11 +118,9 @@ class EinsumScript:
     def split_comp(self, comp: EinsumComp, part_sizes: List[int]) -> None:
         repeats = [EinsumComp(size) for size in part_sizes[1:]]
         comp.size = part_sizes[0]
-        # repeats.insert(0, comp)
         for inp in [*self.inputs, self.outputs]:
             for i in range(len(inp)-1, -1, -1):
                 if inp[i] == comp:
-                    # inp.pop(i)
                     for rep in repeats[::-1]:
                         inp.insert(i+1, rep)
 
@@ -72,18 +136,59 @@ class EinsumScript:
             self.inputs, input_shapes) for sub, comp in zip(subs, shape)}
         return [shape_dict[out_sub] for out_sub in self.outputs]
 
+    def simplify(self):
+        next_map: BiDict[Union[NullTag, EinsumComp],
+                         Union[NullTag, EinsumComp]] = BiDict()
+
+        for comps in [*self.inputs, self.outputs]:
+            prev = NullTag()
+            for comp in comps:
+                if prev in next_map:
+                    if next_map[prev] != comp:
+                        next_map[NullTag()] = next_map[prev]
+                        next_map[NullTag()] = comp
+                        next_map[prev] = NullTag()
+                elif comp in next_map.values():
+                    # Don't need to check if key is already the same as this will be caught by the previous condition
+                    key = next_map.inverse[comp]
+                    next_map[key] = NullTag()
+                    next_map[prev] = NullTag()
+                    next_map[NullTag()] = comp
+                else:
+                    next_map[prev] = comp
+                prev = comp
+            next_map[prev] = NullTag()
+
+        null_tags = [key for key in next_map if isinstance(key, NullTag)]
+        group_pairs: List[Tuple[List[EinsumComp], EinsumComp]] = []
+        for tag in null_tags:
+            seq: List[EinsumComp] = []
+            while not isinstance(next_map[tag], NullTag):
+                seq.append(cast(EinsumComp, next_map[tag]))
+                tag = next_map[tag]
+            if len(seq) > 1:
+                group_pairs.append(
+                    (seq, EinsumComp(math.prod(comp.size for comp in seq))))
+
+        for comps in [*self.inputs, self.outputs]:
+            for group, new_comp in group_pairs:
+                while group[0] in comps:
+                    i = comps.index(group[0])
+                    comps[i] = new_comp
+                    for _ in range(len(group) - 1):
+                        comps.pop(i + 1)
+
+    def simplified(self) -> Self:
+        val = copy.deepcopy(self)
+        val.simplify()
+        return val
+
     @staticmethod
     def _get_char(index: int) -> str:
         return chr((ord('a') if index < 26 else (ord('A') - 26)) + index)
 
     def __str__(self) -> str:
-        # Can't use set because EinsumComp isn't hashable
-        comps: List[EinsumComp] = []
-
-        for inp in self.inputs:
-            for comp in inp:
-                if comp not in comps:
-                    comps.append(comp)
+        comps = list(set(comp for inp in self.inputs for comp in inp))
 
         subs = []
         for inp in self.inputs:
@@ -96,7 +201,6 @@ class EinsumScript:
         return ','.join(subs) + '->' + output_str
 
     def __add__(self, rhs: Self) -> Self:
-        lhs = self
         lhs = copy.deepcopy(self)
         rhs = copy.deepcopy(rhs)
         lhs_out_iter = rev_mut_iter(lhs.outputs)
@@ -104,9 +208,6 @@ class EinsumScript:
 
         lhs_out_val = next(lhs_out_iter)
         rhs_in_val = next(rhs_in_iter)
-
-        print('lhs:', [x.size for x in lhs.outputs])
-        print('rhs:', [x.size for x in rhs.inputs[0]])
 
         try:
             while True:
@@ -148,7 +249,7 @@ def rev_mut_iter(data: List[T]) -> Generator[T, None, None]:
         yield data[i]
 
 
-def einsum_advanced(*args):
+def einsum_pipe(*args):
     subs = [arg for arg in args if isinstance(arg, (str, list, tuple))]
     ops = [arg for arg in args if not isinstance(arg, (str, list, tuple))]
     ops_index = 0
@@ -173,8 +274,10 @@ def einsum_advanced(*args):
         scripts.append(x)
 
     output_script = reduce(lambda x, y: x+y, scripts)
-    print(str(output_script))
-    return np.einsum(str(output_script), *[np.reshape(op, [comp.size for comp in inp]) for op, inp in zip(ops, output_script.inputs)]).reshape([comp.size for comp in scripts[-1].outputs])
+    output_script.simplify()
+    reshaped_ops = [np.reshape(op, [comp.size for comp in inp]) for op, inp in zip(ops, output_script.inputs)]
+    raw_output: np.ndarray = np.einsum(str(output_script), *reshaped_ops)
+    return raw_output.reshape([comp.size for comp in scripts[-1].outputs])
 
 
 def get_subscripts(keep_indices: List[int], length: int, start_at='a') -> str:
@@ -212,22 +315,31 @@ if __name__ == '__main__':
     assert np.allclose(X_base, X_obj)
 
     X_simple = einsum_simple(
-        'ij,kl->ikjl',
+        'ik,jl',
         [2, ]*20,
         'abcde fghij klmno pqrst->cde fghij mno pqrst ab kl',
         [256, 256, 4, 4],
-        'ii...->...',
+        'ii...',
         A, B
     )
 
     assert np.allclose(X_simple, X_obj)
 
-    X_advanced = einsum_advanced(
-        'ij,kl->ikjl',
+    assert np.allclose(np.einsum('a...,...->a...', A, B),
+                       np.einsum('ab,cb->acb', A, B))
+
+    assert np.allclose(np.einsum('...,...c->...c', A, B),
+                       np.einsum('ab,bc->abc', A, B))
+
+    assert np.allclose(np.einsum('...,...c', A, B),
+                       np.einsum('ab,bc->abc', A, B))
+
+    X_advanced = einsum_pipe(
+        'ik,jl',
         [2, ]*20,
         'abcde fghij klmno pqrst->cde fghij mno pqrst ab kl',
         [256, 256, 4, 4],
-        'iijk->jk',
+        'ii...->...',
         A, B
     )
 
