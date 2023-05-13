@@ -7,7 +7,14 @@ from .einsum_script import EinsumScript
 
 def einsum_pipe(*args):
     subs = [arg for arg in args if isinstance(arg, (str, list, tuple))]
-    ops = [arg for arg in args if not isinstance(arg, (str, list, tuple))]
+    ops = []
+    for arg in args:
+        if not isinstance(arg, (str, list, tuple)):
+            try:
+                assert arg.shape is not None
+                ops.append(arg)
+            except AttributeError:
+                ops.append(np.array(arg))
     ops_index = 0
     scripts: List[EinsumScript] = []
 
@@ -17,6 +24,8 @@ def einsum_pipe(*args):
         if not isinstance(sub, str):
             input_shapes.append(sub)
             sub = subs.pop(0)
+        elif len(scripts) != 0:
+            input_shapes.append(scripts[-1].output_shape)
         assert isinstance(sub, str)
 
         args = sub.count(',') + 1 - len(input_shapes)
@@ -25,8 +34,7 @@ def einsum_pipe(*args):
                             for x in ops[ops_index:ops_index+args])
         ops_index += args
 
-        x = EinsumScript.parse(input_shapes, sub)
-        scripts.append(x)
+        scripts.append(EinsumScript.parse(input_shapes, sub))
 
     output_script = reduce(lambda x, y: x+y, scripts)
     output_script.simplify()

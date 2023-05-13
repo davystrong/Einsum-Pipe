@@ -1,7 +1,7 @@
 import copy
 import math
-from typing import Generator, List, Self, Tuple, TypeVar, Union, cast
-from .bidict import BiDict
+from typing import Generator, List, Optional, Self, Tuple, TypeVar, Union, cast
+from .bidict import _BiDict
 
 
 class EinsumComp:
@@ -17,9 +17,11 @@ class EinsumScript:
     def __init__(self, inputs: List[List[EinsumComp]], outputs: List[EinsumComp]) -> None:
         self.inputs = inputs
         self.outputs = outputs
+        self._parsed_script: Optional[str] = None
 
     @classmethod
     def parse(cls, input_shapes: List[List[int]], subscripts: str) -> Self:
+        parsed_subscripts = subscripts
         subscripts = subscripts.replace(' ', '')
         # Easier to deal with broadcasting as a single character
         subscripts = subscripts.replace('...', '?')
@@ -34,6 +36,8 @@ class EinsumScript:
         inputs_subs, output_subs = subscripts.split('->')
         inputs: List[List[EinsumComp]] = []
         broadcast_comps: List[EinsumComp] = []
+        assert len(inputs_subs.split(',')) == len(
+            input_shapes), f'''Error while parsing "{subscripts}" with input shapes {input_shapes}: insuficient input shapes found for number of references in subscripts!'''
         for sub, shape in zip(inputs_subs.split(','), input_shapes):
             inputs.append([])
             for c in sub:
@@ -46,6 +50,8 @@ class EinsumScript:
                 else:
                     inputs[-1].append(letter_dict[c])
 
+        assert len(inputs) > 0
+
         outputs: List[EinsumComp] = []
         for c in output_subs:
             if c == '?':
@@ -55,8 +61,10 @@ class EinsumScript:
                 outputs.append(letter_dict[c])
 
         script = EinsumScript(inputs, outputs)
+        script._parsed_script = parsed_subscripts
         for inp, shape in zip(inputs, input_shapes):
-            assert len(inp) == len(shape)
+            assert len(inp) == len(
+                shape), f'Error while parsing "{subscripts}" with input shapes {input_shapes}: {len(inp)} != {len(shape)}'
             for comp, dim in zip(inp, shape):
                 comp.size = dim
 
@@ -77,15 +85,17 @@ class EinsumScript:
                 if inp[i].size == 1:
                     inp.pop(i)
 
-    def transform_shapes(self, input_shapes: List[List[int]]) -> List[int]:
-        assert len(input_shapes) == len(self.inputs)
-        shape_dict = {sub: comp for subs, shape in zip(
-            self.inputs, input_shapes) for sub, comp in zip(subs, shape)}
-        return [shape_dict[out_sub] for out_sub in self.outputs]
+    @property
+    def input_shapes(self) -> List[Tuple[int]]:
+        return [tuple(comp.size for comp in inp) for inp in self.inputs]
+
+    @property
+    def output_shape(self) -> Tuple[int]:
+        return tuple(comp.size for comp in self.outputs)
 
     def simplify(self):
-        next_map: BiDict[Union[NullTag, EinsumComp],
-                         Union[NullTag, EinsumComp]] = BiDict()
+        next_map: _BiDict[Union[NullTag, EinsumComp],
+                          Union[NullTag, EinsumComp]] = _BiDict()
 
         for comps in [*self.inputs, self.outputs]:
             prev = NullTag()
@@ -134,6 +144,12 @@ class EinsumScript:
     def _get_char(index: int) -> str:
         return chr((ord('a') if index < 26 else (ord('A') - 26)) + index)
 
+    def __repr__(self) -> str:
+        if self._parsed_script is None:
+            return f'"{self}"'
+        else:
+            return f'"{self}" (parsed from "{self._parsed_script}")'
+
     def __str__(self) -> str:
         comps = list(set(comp for inp in self.inputs for comp in inp))
 
@@ -172,7 +188,8 @@ class EinsumScript:
         except StopIteration:
             pass
 
-        assert len(lhs.outputs) == len(rhs.inputs[0])
+        assert len(lhs.outputs) == len(
+            rhs.inputs[0]), f'Incompatible shapes between {repr(lhs)} and {repr(rhs)}: {lhs.output_shape} and {rhs.input_shapes[0]}'
         assert all(x.size == y.size for x, y in zip(
             lhs.outputs, rhs.inputs[0]))
 

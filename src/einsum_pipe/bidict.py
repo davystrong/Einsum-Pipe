@@ -6,7 +6,7 @@ K = TypeVar('K')
 V = TypeVar('V')
 
 
-class BiDict(MutableMapping, Generic[K, V]):
+class _BiDict(MutableMapping, Generic[K, V]):
     """A custom dictionary that keeps track of the inverse mapping from values to keys. Values must be unique too
     """
 

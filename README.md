@@ -44,6 +44,6 @@ Shapes are compatible if each dimension is the product of some subsequence of a 
 
 Note that transposition of axes also causes the transposition of the compatible shape, so while `[(3, 2), 'ij->ij', (2, 3)]` isn't valid, `[(3, 2), 'ij->ji', (2, 3)]` is.
 
-I plan to implement a best effort fallback which would reduce a sequence of operations to as few operations as possible, depending on incompatible shapes.
+I plan to implement a "best effort" fallback which would reduce a sequence of operations to as few operations as possible, depending on incompatible shapes.
 
 ## Numpy Operations
