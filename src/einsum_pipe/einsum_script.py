@@ -30,6 +30,8 @@ class EinsumScript:
         if '->' not in subscripts:
             output_letters = [l for l in letters if l ==
                               '?' or letters.count(l) == 1]
+            if (bc_count := output_letters.count('?')) > 1:
+                output_letters = output_letters[bc_count - 1:]
             subscripts += '->' + ''.join(output_letters)
         letter_dict = {v: EinsumComp(0) for v in set(letters) if v != '?'}
 

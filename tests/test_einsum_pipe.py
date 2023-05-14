@@ -1,4 +1,3 @@
-import pytest
 import numpy as np
 from einsum_pipe import einsum_pipe
 
@@ -101,5 +100,15 @@ def test_multistage_args():
         'abcdbace,->eacd',
         'abcd->acd',
         A, B, 10
+    ]
+    assert np.allclose(einsum_pipe(*args), einsum_pipe_simple(*args))
+
+
+def test_implicit_broadcast():
+    A = np.random.rand(10)
+    B = np.random.rand(10)
+    args = [
+        '...,...',
+        A, B
     ]
     assert np.allclose(einsum_pipe(*args), einsum_pipe_simple(*args))
