@@ -80,6 +80,16 @@ def test_broadcasting():
     assert np.allclose(einsum_pipe(*args), einsum_pipe_simple(*args))
 
 
+def test_unequal_broadcasting():
+    A = np.random.rand(10, 20, 20)
+    B = np.random.rand(10, 20, 30)
+    args = [
+        'ab...,...c->bca...',
+        A, B
+    ]
+    assert np.allclose(einsum_pipe(*args), einsum_pipe_simple(*args))
+
+
 def test_implicit_array_creation():
     A = np.random.rand(10, 20, 30)
     args = [

@@ -48,7 +48,8 @@ class EinsumScript:
                     undefined_axes = len(shape) - (len(sub) - 1)
                     for _ in range(undefined_axes - len(broadcast_comps)):
                         broadcast_comps.insert(0, EinsumComp(0))
-                    inputs[-1].extend(broadcast_comps[-undefined_axes:])
+                    if undefined_axes > 0:
+                        inputs[-1].extend(broadcast_comps[-undefined_axes:])
                 else:
                     inputs[-1].append(letter_dict[c])
 
