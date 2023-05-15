@@ -2,6 +2,14 @@
 
 A Python package to compile multiple Numpy [einsum](https://numpy.org/doc/stable/reference/generated/numpy.einsum.html) operations into one.
 
+## Installation
+
+The package is available on PyPi:
+
+```
+pip install einsum_pipe
+```
+
 ## Example
 
 Given two arrays:
