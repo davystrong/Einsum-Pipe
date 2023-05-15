@@ -21,7 +21,7 @@ X = np.trace(F)
 ```
 
 This obviously results in multiple intermediate arrays, some of which can be large. Instead of doing this, it is possible to combine multiple `np.einsum` operations into one. By carefully modifying the input shape, it is even possible to do this in cases in which the intermediate data is reshaped during the process, provided the shapes are all [compatible](#shape-compatibility). The previous example can instead be performed in a single `np.einsum` step:
-```
+```python
 X = einsum_pipe(
     'ik...,jl...->ijkl...',
     [2, ]*20 + [10, 5],
