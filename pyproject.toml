@@ -4,9 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "einsum_pipe"
-version = "0.0.1"
+version = "0.1.0"
 authors = [
-  { name="David R. Armstrong" },
+  { name="David Armstrong" },
 ]
 description = "A Python package to compile multiple Numpy einsum operations into one"
 readme = "README.md"
