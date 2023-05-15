@@ -1,54 +1,51 @@
 from functools import reduce
-from typing import List, cast
+from typing import List
 
 import numpy as np
 from .einsum_script import EinsumScript
-from .ops import LazySubs
 
 
 def einsum_pipe(*args):
-    subs = [arg for arg in args if isinstance(
-        arg, (str, list, tuple)) or callable(arg)]
-    ops = []
+    subs = []
+    ops: List[np.ndarray] = []
     for arg in args:
-        if not (isinstance(arg, (str, list, tuple)) or callable(arg)):
+        if isinstance(arg, (str, list, tuple)) or callable(arg):
+            if isinstance(arg, list) and not isinstance(arg[0], int):
+                subs.extend(arg)
+            else:
+                subs.append(arg)
+        else:
             try:
                 assert arg.shape is not None
                 ops.append(arg)
             except AttributeError:
                 ops.append(np.array(arg))
-    ops_index = 0
+    unused_shapes = [op.shape for op in ops]
     scripts: List[EinsumScript] = []
 
     while len(subs) > 0:
-        input_shapes = []
         sub = subs.pop(0)
-        if not (isinstance(sub, str) or callable(sub)):
-            input_shapes.append(sub)
-            sub = subs.pop(0)
-        elif len(scripts) != 0:
-            input_shapes.append(scripts[-1].output_shape)
-        assert isinstance(sub, str) or callable(sub)
-
-        try:
+        if isinstance(sub, str):
+            # Normal subscript
             nargs = sub.count(',') + 1
-        except AttributeError:
-            try:
-                nargs = cast(LazySubs, sub).nargs
-            except AttributeError:
-                nargs = 1
-        n_missing_args = nargs - len(input_shapes)
+            input_shapes = [list(unused_shapes.pop(0)) for _ in range(nargs)]
+            script = EinsumScript.parse(input_shapes, sub)
+            unused_shapes.insert(0, script.output_shape)
+            scripts.append(script)
+        elif callable(sub):
+            # Lazy argument
+            subs.insert(0, sub(unused_shapes))
+        elif isinstance(sub, (list, tuple)):
+            if isinstance(sub[0], int):
+                # Reshape
+                unused_shapes[0] = tuple(sub)
+            else:
+                # Inner list which needs to be flattened
+                for val in sub[::-1]:
+                    subs.insert(0, val)
 
-        input_shapes.extend(tuple(x.shape)
-                            for x in ops[ops_index:ops_index+n_missing_args])
-        ops_index += n_missing_args
-
-        if callable(sub):
-            sub = sub(input_shapes)
-        scripts.append(EinsumScript.parse(input_shapes, sub))
-
+    output_shape = unused_shapes[0]
     output_script = reduce(lambda x, y: x+y, scripts)
-    output_shape = scripts[-1].output_shape
     output_script.simplify()
     reshaped_ops = [np.reshape(op, [comp.size for comp in inp])
                     for op, inp in zip(ops, output_script.inputs)]
