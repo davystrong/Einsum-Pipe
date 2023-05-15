@@ -47,3 +47,18 @@ Note that transposition of axes also causes the transposition of the compatible 
 I plan to implement a "best effort" fallback which would reduce a sequence of operations to as few operations as possible, depending on incompatible shapes.
 
 ## Numpy Operations
+
+Numpy's documentation on [einsum](https://numpy.org/doc/stable/reference/generated/numpy.einsum.html) lists some operations that can be implemented using `np.einsum`. Some of these have been implemented here in the `ops` submodule. These are just convenience functions to generate the correct subscripts for `np.einsum`, they generally produce a string. They can be used as part of `einsum_pipe` operations:
+```python
+from einsum_pipe import ops
+
+X = einsum_pipe(
+    ops.inner(),
+    ops.transpose((1, 0))
+    ops.diag(),
+    'a->'
+    A, B
+)
+```
+
+More operations may be added in future. As part of this implementation, `einsum_pipe` also supports "lazy" arguments: functions passed as arguments which will be called during parsing with the list of available input shapes, to then produce the subscript string or a reshape operation. Note this is still run during "compilation", not when running with `np.einsum`.
