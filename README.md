@@ -40,7 +40,7 @@ X = einsum_pipe(
 )
 ```
 
-Internally, this calculates a compatible input shape, `(4, 8, 4, 8, 50)` and `(32, 32, 50)`, and a combined `np.einsum` set of subscripts, `"ebdbc,aac->edc"`. `A` and `B` are reshaped (which is generally essentially free), the single `np.einsum` operation is run, and the output is reshaped back to the expected output shape.
+Internally, this calculates a compatible input shape, `(4, 8, 4, 8, 50)` and `(32, 32, 50)`, and a combined `np.einsum` set of subscripts, `"ebdbc,aac->edc"`. `A` and `B` are reshaped (which is frequently free), the single `np.einsum` operation is run, and the output is reshaped back to the expected output shape.
 
 You can find further examples in the "tests" folder.
 
@@ -55,6 +55,12 @@ Shapes are compatible if each dimension is the product of some subsequence of a 
 Note that transposition of axes also causes the transposition of the compatible shape, so while `[(3, 2), 'ij->ij', (2, 3)]` isn't valid, `[(3, 2), 'ij->ji', (2, 3)]` is.
 
 I plan to implement a "best effort" fallback which would reduce a sequence of operations to as few operations as possible, depending on incompatible shapes.
+
+## Subscript Simplification
+
+In order to merge multiple subscript steps with different intermediate shapes, the input arrays must be reshaped to be compatible with all steps. However, after merging multiple subscripts, certain complex shapes may be eliminated. While it makes no difference to the performance of the operations, the actual subscript string passed to `np.einsum` can be unnecessarily long. This may even be an issue if there are more axes than available letters.
+
+`einsum_pipe` includes the `simplify` argument to deal with such cases. This can be set to `False` to disable simplification or `"max"` to reduce the length of the subscripts as much as possible. However, this isn't always advisable as merging smaller axes into a larger axis can force an array copy during the initial `reshape` if the input array has been transposed (more on that [here](https://stackoverflow.com/a/60389152/11057932)). Splitting an axis should never cause a problem. The default argument (`True`) simplifies the subscript as much as possible while maintaining the splits from the original input arrays. If your inputs are contiguous, you can safely use `"max"`.
 
 ## Numpy Operations
 

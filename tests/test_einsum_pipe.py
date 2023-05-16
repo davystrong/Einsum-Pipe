@@ -1,5 +1,5 @@
 import numpy as np
-from einsum_pipe import einsum_pipe
+from einsum_pipe import einsum_pipe, compile_einsum_args
 
 
 def einsum_pipe_simple(*args):
@@ -122,3 +122,21 @@ def test_implicit_broadcast():
         A, B
     ]
     assert np.allclose(einsum_pipe(*args), einsum_pipe_simple(*args))
+
+
+def test_simplify():
+    # Make a discontiguous array
+    A = np.random.rand(3, 3, 3, 9).transpose((0, 2, 1, 3))
+    assert not A.flags['CONTIGUOUS']
+
+    script, output_shape = compile_einsum_args(
+        [(27, 3, 3), 'abc->bc'], [A.shape], True)
+    script_max, output_shape_max = compile_einsum_args(
+        [(27, 3, 3), 'abc->bc'], [A.shape], 'max')
+
+    X = A.reshape(script.input_shapes[0])
+    Y = A.reshape(script_max.input_shapes[0])
+    assert all(x == y for x, y in zip(output_shape, output_shape_max))
+    assert np.shares_memory(A, X) and not np.shares_memory(A, Y)
+    assert np.allclose(einsum_pipe(A, script=script, output_shape=output_shape), einsum_pipe(
+        A, script=script_max, output_shape=output_shape_max))

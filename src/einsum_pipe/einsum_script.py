@@ -96,7 +96,9 @@ class EinsumScript:
     def output_shape(self) -> Tuple[int]:
         return tuple(comp.size for comp in self.outputs)
 
-    def simplify(self):
+    def simplify(self, keep_shapes: Optional[List[Tuple[int, ...]]] = None):
+        # Get sequences (repeated or not) in which each element is unique to the sequence
+        # Basically, run through it as something like a linked list
         next_map: _BiDict[Union[NullTag, EinsumComp],
                           Union[NullTag, EinsumComp]] = _BiDict()
 
@@ -130,6 +132,7 @@ class EinsumScript:
                 group_pairs.append(
                     (seq, EinsumComp(math.prod(comp.size for comp in seq))))
 
+        # Replace sequences of comps with their respective group comp
         for comps in [*self.inputs, self.outputs]:
             for group, new_comp in group_pairs:
                 while group[0] in comps:
@@ -138,9 +141,32 @@ class EinsumScript:
                     for _ in range(len(group) - 1):
                         comps.pop(i + 1)
 
-    def simplified(self) -> Self:
+        if keep_shapes is not None:
+            for inp, input_shape in zip(self.inputs, keep_shapes):
+                input_shape_iter = iter(input_shape[::-1])
+                inp_in_iter = rev_mut_iter(inp)
+
+                try:
+                    input_shape_val = next(input_shape_iter)
+                    inp_in_val = next(inp_in_iter)
+
+                    while True:
+                        if input_shape_val == inp_in_val.size:
+                            input_shape_val = next(input_shape_iter)
+                            inp_in_val = next(inp_in_iter)
+                        elif input_shape_val > inp_in_val.size:
+                            input_shape_val //= inp_in_val.size
+                            inp_in_val = next(inp_in_iter)
+                        else:
+                            self.split_comp(inp_in_val, [
+                                inp_in_val.size // input_shape_val, input_shape_val])
+                            input_shape_val = next(input_shape_iter)
+                except StopIteration:
+                    pass
+
+    def simplified(self, keep_shape: Optional[List[Tuple[int, ...]]] = None) -> Self:
         val = copy.deepcopy(self)
-        val.simplify()
+        val.simplify(keep_shape)
         return val
 
     @staticmethod
@@ -172,10 +198,10 @@ class EinsumScript:
         lhs_out_iter = rev_mut_iter(lhs.outputs)
         rhs_in_iter = rev_mut_iter(rhs.inputs[0])
 
-        lhs_out_val = next(lhs_out_iter)
-        rhs_in_val = next(rhs_in_iter)
-
         try:
+            lhs_out_val = next(lhs_out_iter)
+            rhs_in_val = next(rhs_in_iter)
+
             while True:
                 if lhs_out_val.size == rhs_in_val.size:
                     lhs_out_val = next(lhs_out_iter)
