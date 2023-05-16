@@ -47,16 +47,16 @@ def compile_einsum_args(subscripts: List[Subscript], input_shapes: List[Tuple[in
 
 
 @overload
-def einsum_pipe(*args, simplify=True): ...
+def einsum_pipe(*args, simplify=True, **kwargs): ...
 
 
 @overload
 def einsum_pipe(*args, simplify=True,
-                script: EinsumScript, output_shape: Tuple[int, ...]): ...
+                script: EinsumScript, output_shape: Tuple[int, ...], **kwargs): ...
 
 
 def einsum_pipe(*args, simplify=True,
-                script: Optional[EinsumScript] = None, output_shape: Optional[Tuple[int, ...]] = None):
+                script: Optional[EinsumScript] = None, output_shape: Optional[Tuple[int, ...]] = None, **kwargs):
     assert (script is None and output_shape is None) or (
         script is not None and output_shape is not None)
     subs = []
@@ -82,5 +82,6 @@ def einsum_pipe(*args, simplify=True,
 
     reshaped_ops = [np.reshape(op, [comp.size for comp in inp])
                     for op, inp in zip(ops, output_script.inputs)]
-    raw_output: np.ndarray = np.einsum(str(output_script), *reshaped_ops)
+    raw_output: np.ndarray = np.einsum(
+        str(output_script), *reshaped_ops, **kwargs)
     return raw_output.reshape(cast(Shape, output_shape))
