@@ -13,6 +13,11 @@ class NullTag:
     pass
 
 
+def _get_char(index: int) -> str:
+    assert index < 26*2
+    return chr((ord('a') if index < 26 else (ord('A') - 26)) + index)
+
+
 class EinsumScript:
     def __init__(self, inputs: List[List[EinsumComp]], outputs: List[EinsumComp]) -> None:
         self.inputs = inputs
@@ -169,10 +174,6 @@ class EinsumScript:
         val.simplify(keep_shape)
         return val
 
-    @staticmethod
-    def _get_char(index: int) -> str:
-        return chr((ord('a') if index < 26 else (ord('A') - 26)) + index)
-
     def __repr__(self) -> str:
         if self._parsed_script is None:
             return f'"{self}"'
@@ -184,10 +185,9 @@ class EinsumScript:
 
         subs = []
         for inp in self.inputs:
-            subs.append(''.join(self._get_char(comps.index(comp))
-                        for comp in inp))
+            subs.append(''.join(_get_char(comps.index(comp)) for comp in inp))
 
-        output_str = ''.join(self._get_char(comps.index(comp))
+        output_str = ''.join(_get_char(comps.index(comp))
                              for comp in self.outputs)
 
         return ','.join(subs) + '->' + output_str

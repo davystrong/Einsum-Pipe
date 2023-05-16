@@ -1,5 +1,6 @@
 from typing import Any, Callable, List, Tuple, Union
 import math
+from .einsum_script import _get_char
 
 
 Subs = Union[str, Callable[[List[List[int]]], Union[str, List, Tuple]]]
@@ -10,9 +11,8 @@ def _build_base_subs(axis1: int, axis2: int) -> List[str]:
     # positive indices, i.e. an array with 5 dims and a reference to axis 4 and -5 produces
     # an invalid output. As such, it's only safe to use this if both axes are positive or both is negative.
     axis1, axis2 = sorted([axis1, axis2])
-    subs = [chr(ord('a') + i) for i in range(axis2 + 1)] + ['...'] + \
-        [chr(ord('a') + max(axis2 + 1, 0) + i - axis1)
-         for i in range(axis1, 0)]
+    subs = [_get_char(i) for i in range(axis2 + 1)] + ['...'] + \
+        [_get_char(max(axis2 + 1, 0) + i - axis1) for i in range(axis1, 0)]
     return subs
 
 
@@ -33,7 +33,7 @@ def trace(axis1=0, axis2=1) -> Subs:
         return ''.join(subs)
     else:
         def inner(input_shapes: List[List[int]]) -> str:
-            subs = [chr(ord('a') + i) for i in range(len(input_shapes[0]))]
+            subs = [_get_char(i) for i in range(len(input_shapes[0]))]
             subs[axis2] = subs[axis1]
             return ''.join(subs)
         return inner
@@ -55,7 +55,7 @@ def diagonal(axis1=0, axis2=1) -> Subs:
         return from_subs(subs)
     else:
         def inner(input_shapes: List[List[int]]) -> str:
-            subs = [chr(ord('a') + i) for i in range(len(input_shapes[0]))]
+            subs = [_get_char(i) for i in range(len(input_shapes[0]))]
             return from_subs(subs)
         return inner
 
@@ -85,7 +85,7 @@ def sum(axis: Union[None, int, List[int], Tuple[int, ...]] = None) -> Subs:
             return from_subs(subs)
         else:
             def inner(input_shapes: List[List[int]]) -> str:
-                subs = [chr(ord('a') + i) for i in range(len(input_shapes[0]))]
+                subs = [_get_char(i) for i in range(len(input_shapes[0]))]
                 return from_subs(subs)
             return inner
 
@@ -93,12 +93,12 @@ def sum(axis: Union[None, int, List[int], Tuple[int, ...]] = None) -> Subs:
 def transpose(axes: Union[None, List[int], Tuple[int, ...]]) -> Subs:
     if axes is None:
         def inner(input_shapes: List[List[int]]) -> str:
-            in_subs = ''.join([chr(ord('a') + i)
+            in_subs = ''.join([_get_char(i)
                               for i in range(len(input_shapes[0]))])
             return in_subs[::-1]
         return inner
     else:
-        in_subs = [chr(ord('a') + i) for i in range(len(axes))]
+        in_subs = [_get_char(i) for i in range(len(axes))]
         out_subs = [in_subs[a] for a in axes]
         return ''.join(in_subs) + '->' + ''.join(out_subs)
 
@@ -110,7 +110,7 @@ def inner() -> Subs:
 def outer() -> Subs:
     def inner(input_shapes: List[List[int]]):
         out_shape = [math.prod(input_shapes[0]), math.prod(input_shapes[1])]
-        in_subs = [chr(ord('a') + i)
+        in_subs = [_get_char(i)
                    for i in range(len(input_shapes[0]) + len(input_shapes[1]))]
         in_subs.insert(len(input_shapes[0]), ',')
         in_subs = ''.join(in_subs)
