@@ -1,6 +1,7 @@
+from __future__ import annotations
 import copy
 import math
-from typing import Generator, List, Optional, Self, Tuple, TypeVar, Union, cast
+from typing import Generator, List, Optional, Tuple, TypeVar, Union, cast
 from .bidict import _BiDict
 
 
@@ -25,7 +26,7 @@ class EinsumScript:
         self._parsed_script: Optional[str] = None
 
     @classmethod
-    def parse(cls, input_shapes: List[List[int]], subscripts: str) -> Self:
+    def parse(cls, input_shapes: List[List[int]], subscripts: str) -> EinsumScript:
         parsed_subscripts = subscripts
         subscripts = subscripts.replace(' ', '')
         # Easier to deal with broadcasting as a single character
@@ -169,7 +170,7 @@ class EinsumScript:
                 except StopIteration:
                     pass
 
-    def simplified(self, keep_shape: Optional[List[Tuple[int, ...]]] = None) -> Self:
+    def simplified(self, keep_shape: Optional[List[Tuple[int, ...]]] = None) -> EinsumScript:
         val = copy.deepcopy(self)
         val.simplify(keep_shape)
         return val
@@ -192,7 +193,7 @@ class EinsumScript:
 
         return ','.join(subs) + '->' + output_str
 
-    def __add__(self, rhs: Self) -> Self:
+    def __add__(self, rhs: EinsumScript) -> EinsumScript:
         lhs = copy.deepcopy(self)
         rhs = copy.deepcopy(rhs)
         lhs_out_iter = rev_mut_iter(lhs.outputs)
@@ -216,6 +217,9 @@ class EinsumScript:
                     lhs_out_val = next(lhs_out_iter)
         except StopIteration:
             pass
+
+        rhs.remove_ones()
+        lhs.remove_ones()
 
         assert len(lhs.outputs) == len(
             rhs.inputs[0]), f'Incompatible shapes between {repr(lhs)} and {repr(rhs)}: {lhs.output_shape} and {rhs.input_shapes[0]}'
