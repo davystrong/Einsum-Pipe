@@ -47,16 +47,16 @@ def compile_einsum_args(subscripts: List[Subscript], input_shapes: List[Tuple[in
 
 
 @overload
-def einsum_pipe(*args, simplify=True, **kwargs): ...
+def einsum_pipe(*args, simplify=True, **kwargs) -> np.ndarray: ...
 
 
 @overload
 def einsum_pipe(*args, simplify=True,
-                script: EinsumScript, output_shape: Tuple[int, ...], **kwargs): ...
+                script: EinsumScript, output_shape: Tuple[int, ...], **kwargs) -> np.ndarray: ...
 
 
 def einsum_pipe(*args, simplify=True,
-                script: Optional[EinsumScript] = None, output_shape: Optional[Tuple[int, ...]] = None, **kwargs):
+                script: Optional[EinsumScript] = None, output_shape: Optional[Tuple[int, ...]] = None, **kwargs) -> np.ndarray:
     assert (script is None and output_shape is None) or (
         script is not None and output_shape is not None)
     subs = []
