@@ -129,9 +129,9 @@ def test_simplify():
     A = np.random.rand(3, 3, 3, 9).transpose((0, 2, 1, 3))
     assert not A.flags['CONTIGUOUS']
 
-    script, output_shape = compile_einsum_args(
+    (script, *_), output_shape = compile_einsum_args(
         [(27, 3, 3), 'abc->bc'], [A.shape], True)
-    script_max, output_shape_max = compile_einsum_args(
+    (script_max, *_), output_shape_max = compile_einsum_args(
         [(27, 3, 3), 'abc->bc'], [A.shape], 'max')
 
     X = A.reshape(script.input_shapes[0])
@@ -140,3 +140,30 @@ def test_simplify():
     assert np.shares_memory(A, X) and not np.shares_memory(A, Y)
     assert np.allclose(einsum_pipe(A, script=script, output_shape=output_shape), einsum_pipe(
         A, script=script_max, output_shape=output_shape_max))
+
+
+def test_incompatible_steps_simple():
+    A = np.random.rand(6)
+    args = [
+        [3, 2],
+        'ij->ji',
+        [3, 2],
+        'ij->ji',
+        A
+    ]
+    assert np.allclose(einsum_pipe(*args), einsum_pipe_simple(*args))
+
+
+def test_incompatible_steps_many():
+    A = np.random.rand(6, 4, 12)
+    B = np.random.rand(4, 4, 12)
+    args = [
+        [3, 2, 4, 12],
+        'ijkl->ji',
+        [6],
+        'i,klm->iklm',
+        [3, 2, 4, 4, 12],
+        'ijklm->jiklm',
+        A, B
+    ]
+    assert np.allclose(einsum_pipe(*args), einsum_pipe_simple(*args))

@@ -1,17 +1,79 @@
 import copy
 from functools import reduce
-from typing import Callable, List, Optional, Tuple, Union, cast, overload
+import itertools
+import math
+from typing import Callable, Dict, List, Optional, Tuple, Union, cast, overload
 
 import numpy as np
-from .einsum_script import EinsumScript
+from .einsum_script import EinsumScript, IncompatibleShapeError
 
 Shape = Tuple[int, ...]
 Subscript = Union[Shape, str, Callable[[List[Shape]],
                                        'Subscript'], List['Subscript'], Tuple['Subscript', ...]]
 
 
+class _ScriptAdder:
+    def __init__(self, scripts: List[EinsumScript]) -> None:
+        self.scripts = scripts
+        self.cache: Dict[Tuple[int, int], EinsumScript] = {}
+
+    def __call__(self, start: int, stop: int) -> EinsumScript:
+        try:
+            (cache_start, cache_stop), output = max(((key, val) for key, val in self.cache.items(
+            ) if key[0] >= start and key[1] <= stop), key=lambda item: item[0][1] - item[0][0])
+            if cache_start != start:
+                output = self(start, cache_start) + output
+            if cache_stop != stop:
+                output += self(cache_stop, stop)
+            return output
+        except ValueError:
+            return reduce(lambda x, y: x+y, self.scripts[start:stop])
+
+
+def _improve_splits(scripts: List[EinsumScript], output_sizes: List[int], split_indices: List[int], script_adder: _ScriptAdder) -> List[int]:
+    # Find the combinations of indices which would result in the smallest total memory
+    combinations = itertools.product(
+        *[list(range(x+1, y+1)) for x, y in zip([0, *split_indices], split_indices)])
+    sorted_groups = sorted(combinations, key=lambda comb: sum(
+        output_sizes[x-1] for x in comb))
+
+    for indices in sorted_groups:
+        try:
+            for x, y in zip([0, *indices], [*indices, len(scripts)]):
+                script_adder(x, y)
+            return list(indices)
+        except IncompatibleShapeError:
+            pass
+    return split_indices
+
+
+def _collapse(scripts: List[EinsumScript]) -> List[EinsumScript]:
+    if len(scripts) == 0:
+        return []
+    split_indices: List[int] = []
+    splits: List[EinsumScript] = [scripts[0]]
+    output_sizes: List[int] = []
+    for i, script in enumerate(scripts[1:], 1):
+        try:
+            output_sizes.append(math.prod(splits[-1].output_shape))
+            splits[-1] += script
+        except IncompatibleShapeError:
+            splits.append(script)
+            split_indices.append(i)
+
+    split_min_sizes = [min(output_sizes[x:y])
+                       for x, y in zip([None, *split_indices], split_indices)]
+    if len(splits) == 1 or all(output_sizes[i-1] == split_min_size for i, split_min_size in zip(split_indices, split_min_sizes)):
+        return splits
+    else:
+        script_adder = _ScriptAdder(scripts)
+        split_indices = _improve_splits(
+            scripts, output_sizes, split_indices, script_adder)
+        return [script_adder(x, y) for x, y in zip([0, *split_indices], [*split_indices, len(scripts)])]
+
+
 def compile_einsum_args(subscripts: List[Subscript], input_shapes: List[Tuple[int, ...]],
-                        simplify: Union[str, bool] = True) -> Tuple[EinsumScript, Tuple[int, ...]]:
+                        simplify: Union[str, bool] = True) -> Tuple[List[EinsumScript], Tuple[int, ...]]:
     unused_shapes = copy.copy(input_shapes)
     scripts: List[EinsumScript] = []
 
@@ -38,12 +100,20 @@ def compile_einsum_args(subscripts: List[Subscript], input_shapes: List[Tuple[in
                     subscripts.insert(0, cast(Subscript, val))
 
     output_shape = unused_shapes[0]
-    output_script = reduce(lambda x, y: x+y, scripts)
+    output_scripts = _collapse(scripts)
+
     if simplify == 'max':
-        output_script.simplify()
+        for script in output_scripts:
+            script.simplify()
     elif simplify:
-        output_script.simplify(input_shapes)
-    return output_script, output_shape
+        input_shape_iter = iter(input_shapes)
+        first_val = next(input_shape_iter)
+        for script in output_scripts:
+            script.simplify()
+            script.match_splits([first_val] + [next(input_shape_iter)
+                                for _ in script.inputs[1:]])
+            first_val = None
+    return output_scripts, output_shape
 
 
 @overload
@@ -75,13 +145,17 @@ def einsum_pipe(*args, simplify=True,
                 ops.append(np.array(arg))
 
     if script is None:
-        output_script, output_shape = compile_einsum_args(
+        output_scripts, output_shape = compile_einsum_args(
             subs, [op.shape for op in ops], simplify=simplify)
     else:
-        output_script = script
+        output_scripts = [script]
 
-    reshaped_ops = [np.reshape(op, [comp.size for comp in inp])
-                    for op, inp in zip(ops, output_script.inputs)]
-    raw_output: np.ndarray = np.einsum(
-        str(output_script), *reshaped_ops, **kwargs)
-    return raw_output.reshape(cast(Shape, output_shape))
+    ops_iter = iter(ops)
+    state = next(ops_iter)
+
+    for script in output_scripts:
+        reshaped_ops = [np.reshape(op, shape)
+                        for shape, op in zip(script.input_shapes, itertools.chain([state], ops_iter))]
+        state = np.einsum(str(script), *reshaped_ops, **kwargs)
+
+    return state.reshape(cast(Shape, output_shape))

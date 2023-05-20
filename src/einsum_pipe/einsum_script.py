@@ -14,6 +14,12 @@ class NullTag:
     pass
 
 
+class IncompatibleShapeError(Exception):
+    def __init__(self, shape_a: Tuple[int, ...], shape_b: Tuple[int, ...]) -> None:
+        message = f'Incompatible shapes: {shape_a} vs {shape_b}'
+        super().__init__(message)
+
+
 def _get_char(index: int) -> str:
     assert index < 26*2
     return chr((ord('a') if index < 26 else (ord('A') - 26)) + index)
@@ -102,7 +108,7 @@ class EinsumScript:
     def output_shape(self) -> Tuple[int]:
         return tuple(comp.size for comp in self.outputs)
 
-    def simplify(self, keep_shapes: Optional[List[Tuple[int, ...]]] = None):
+    def simplify(self):
         # Get sequences (repeated or not) in which each element is unique to the sequence
         # Basically, run through it as something like a linked list
         next_map: _BiDict[Union[NullTag, EinsumComp],
@@ -147,33 +153,35 @@ class EinsumScript:
                     for _ in range(len(group) - 1):
                         comps.pop(i + 1)
 
-        if keep_shapes is not None:
-            for inp, input_shape in zip(self.inputs, keep_shapes):
-                input_shape_iter = iter(input_shape[::-1])
-                inp_in_iter = rev_mut_iter(inp)
-
-                try:
-                    input_shape_val = next(input_shape_iter)
-                    inp_in_val = next(inp_in_iter)
-
-                    while True:
-                        if input_shape_val == inp_in_val.size:
-                            input_shape_val = next(input_shape_iter)
-                            inp_in_val = next(inp_in_iter)
-                        elif input_shape_val > inp_in_val.size:
-                            input_shape_val //= inp_in_val.size
-                            inp_in_val = next(inp_in_iter)
-                        else:
-                            self.split_comp(inp_in_val, [
-                                inp_in_val.size // input_shape_val, input_shape_val])
-                            input_shape_val = next(input_shape_iter)
-                except StopIteration:
-                    pass
-
-    def simplified(self, keep_shape: Optional[List[Tuple[int, ...]]] = None) -> EinsumScript:
+    def simplified(self) -> EinsumScript:
         val = copy.deepcopy(self)
-        val.simplify(keep_shape)
+        val.simplify()
         return val
+
+    def match_splits(self, shapes: List[Optional[Tuple[int, ...]]]) -> None:
+        for inp, input_shape in zip(self.inputs, shapes):
+            if input_shape is None:
+                continue
+            input_shape_iter = iter(input_shape[::-1])
+            inp_in_iter = rev_mut_iter(inp)
+
+            try:
+                input_shape_val = next(input_shape_iter)
+                inp_in_val = next(inp_in_iter)
+
+                while True:
+                    if input_shape_val == inp_in_val.size:
+                        input_shape_val = next(input_shape_iter)
+                        inp_in_val = next(inp_in_iter)
+                    elif input_shape_val > inp_in_val.size:
+                        input_shape_val //= inp_in_val.size
+                        inp_in_val = next(inp_in_iter)
+                    else:
+                        self.split_comp(inp_in_val, [
+                            inp_in_val.size // input_shape_val, input_shape_val])
+                        input_shape_val = next(input_shape_iter)
+            except StopIteration:
+                pass
 
     def __repr__(self) -> str:
         if self._parsed_script is None:
@@ -207,14 +215,17 @@ class EinsumScript:
                 if lhs_out_val.size == rhs_in_val.size:
                     lhs_out_val = next(lhs_out_iter)
                     rhs_in_val = next(rhs_in_iter)
-                elif lhs_out_val.size > rhs_in_val.size:
+                elif lhs_out_val.size % rhs_in_val.size == 0:
                     lhs.split_comp(lhs_out_val, [
                         lhs_out_val.size // rhs_in_val.size, rhs_in_val.size])
                     rhs_in_val = next(rhs_in_iter)
-                else:
+                elif rhs_in_val.size % lhs_out_val.size == 0:
                     rhs.split_comp(rhs_in_val, [
                         rhs_in_val.size // lhs_out_val.size, lhs_out_val.size])
                     lhs_out_val = next(lhs_out_iter)
+                else:
+                    raise IncompatibleShapeError(
+                        lhs.output_shape, rhs.input_shapes[0])
         except StopIteration:
             pass
 
