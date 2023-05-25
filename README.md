@@ -1,6 +1,6 @@
 # Einsum Pipe
 
-A Python package to compile multiple Numpy [einsum](https://numpy.org/doc/stable/reference/generated/numpy.einsum.html) operations into one.
+A Python package to compile multiple Numpy [einsum](https://numpy.org/doc/stable/reference/generated/numpy.einsum.html) operations into one. While this package produces strings which are compatible with the default `np.einsum`, it actually uses [opt_einsum](https://dgasmith.github.io/opt_einsum/) as this is significantly faster.
 
 ## Installation
 
@@ -40,7 +40,7 @@ X = einsum_pipe(
 )
 ```
 
-Internally, this calculates a compatible input shape, `(4, 8, 4, 8, 50)` and `(32, 32, 50)`, and a combined `np.einsum` set of subscripts, `"ebdbc,aac->edc"`. `A` and `B` are reshaped (which is frequently free), the single `np.einsum` operation is run, and the output is reshaped back to the expected output shape.
+Internally, this calculates a compatible input shape, `(4, 8, 4, 8, 50)` and `(32, 32, 50)`, and a combined `np.einsum` set of subscripts, `"ebdbc,aac->edc"`. `A` and `B` are reshaped (which is frequently free), the single `np.einsum` (or `opt_einsum.contract` in practice) operation is run, and the output is reshaped back to the expected output shape.
 
 You can find further examples in the "tests" folder.
 
@@ -54,7 +54,7 @@ Shapes are compatible if each dimension is the product of some subsequence of a 
 
 Note that transposition of axes also causes the transposition of the compatible shape, so while `[(3, 2), 'ij->ij', (2, 3)]` isn't valid, `[(3, 2), 'ij->ji', (2, 3)]` is.
 
-I plan to implement a "best effort" fallback which would reduce a sequence of operations to as few operations as possible, depending on incompatible shapes.
+If a series of steps are incompatible, `einsum_pipe` will reduce it down to the fewest number of steps possible and optimise for the smallest intermediate array size. This isn't guaranteed to be the absolute optimum since calling this function recursively could reduce it further, but this probably isn't worth it.
 
 ## Subscript Simplification
 
