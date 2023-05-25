@@ -6,6 +6,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union, cast, overload
 
 import numpy as np
 from .einsum_script import EinsumScript, IncompatibleShapeError
+import opt_einsum
 
 Shape = Tuple[int, ...]
 Subscript = Union[Shape, str, Callable[[List[Shape]],
@@ -157,6 +158,7 @@ def einsum_pipe(*args, simplify=True,
     for script in output_scripts:
         reshaped_ops = [np.reshape(op, shape)
                         for shape, op in zip(script.input_shapes, itertools.chain([state], ops_iter))]
-        state = np.einsum(str(script), *reshaped_ops, **kwargs)
+        state = cast(np.ndarray, opt_einsum.contract(
+            str(script), *reshaped_ops, **kwargs))
 
     return state.reshape(cast(Shape, output_shape))

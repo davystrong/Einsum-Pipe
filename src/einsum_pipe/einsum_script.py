@@ -1,7 +1,7 @@
 from __future__ import annotations
 import copy
 import math
-from typing import Generator, List, NamedTuple, Optional, Tuple, TypeVar
+from typing import Generator, List, Optional, Tuple, TypeVar
 
 
 class EinsumComp:
