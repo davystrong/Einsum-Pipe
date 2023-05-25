@@ -54,6 +54,7 @@ def _collapse(scripts: List[EinsumScript]) -> List[EinsumScript]:
     splits: List[EinsumScript] = [scripts[0]]
     output_sizes: List[int] = []
     for i, script in enumerate(scripts[1:], 1):
+        script.simplify()
         try:
             output_sizes.append(math.prod(splits[-1].output_shape))
             splits[-1] += script

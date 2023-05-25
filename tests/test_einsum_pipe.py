@@ -1,5 +1,6 @@
 import numpy as np
 from einsum_pipe import einsum_pipe, compile_einsum_args
+from einsum_pipe.einsum_script import EinsumScript
 
 
 def einsum_pipe_simple(*args):
@@ -122,6 +123,13 @@ def test_implicit_broadcast():
         A, B
     ]
     assert np.allclose(einsum_pipe(*args), einsum_pipe_simple(*args))
+
+
+def test_basic_simplify():
+    script_a = EinsumScript.parse([[10, 20, 5, 6]], 'abcd->acd')
+    script_a.simplify()
+    script_b = EinsumScript.parse([[10, 20, 30]], 'abc->ac')
+    assert str(script_a) == str(script_b)
 
 
 def test_simplify():
